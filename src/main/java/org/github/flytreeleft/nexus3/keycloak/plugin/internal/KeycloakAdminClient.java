@@ -3,6 +3,9 @@ package org.github.flytreeleft.nexus3.keycloak.plugin.internal;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.security.KeyManagementException;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -10,7 +13,12 @@ import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.http.client.HttpClient;
+import org.apache.http.conn.ssl.NoopHostnameVerifier;
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
+import org.apache.http.conn.ssl.TrustSelfSignedStrategy;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
+import org.apache.http.ssl.SSLContextBuilder;
 import org.apache.shiro.util.StringUtils;
 import org.github.flytreeleft.nexus3.keycloak.plugin.internal.http.ClientAuthenticator;
 import org.github.flytreeleft.nexus3.keycloak.plugin.internal.http.Http;
@@ -27,6 +35,9 @@ import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.util.JsonSerialization;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.SSLContext;
 
 /**
  * Client needs service-account with at least "view-clients, view-users" roles for "realm-management"
@@ -288,7 +299,8 @@ public class KeycloakAdminClient {
 
     public synchronized Http getHttp() {
         if (this.http == null) {
-            HttpClient httpClient = HttpClients.createDefault();
+            //HttpClient httpClient = HttpClients.createDefault();
+            HttpClient httpClient = createAcceptSelfSignedCertificateClient();
             ClientAuthenticator clientAuthenticator = (HttpMethod httpMethod) -> {
                 String token = getTokenManager().getAccessTokenString();
 
@@ -300,6 +312,33 @@ public class KeycloakAdminClient {
         }
 
         return this.http;
+    }
+
+    private static CloseableHttpClient createAcceptSelfSignedCertificateClient() {
+        try {
+            // use the TrustSelfSignedStrategy to allow Self Signed Certificates
+            SSLContext sslContext = SSLContextBuilder
+                    .create()
+                    .loadTrustMaterial(new TrustSelfSignedStrategy())
+                    .build();
+
+            // we can optionally disable hostname verification.
+            // if you don't want to further weaken the security, you don't have to include this.
+            HostnameVerifier allowAllHosts = new NoopHostnameVerifier();
+
+            // create an SSL Socket Factory to use the SSLContext with the trust self signed certificate strategy
+            // and allow all hosts verifier.
+            SSLConnectionSocketFactory connectionFactory = new SSLConnectionSocketFactory(sslContext, allowAllHosts);
+
+            // finally create the HttpClient using HttpClient factory methods and assign the ssl socket factory
+            return HttpClients
+                    .custom()
+                    .setSSLSocketFactory(connectionFactory)
+                    .build();
+        } catch (Exception e) {
+            return null;
+        }
+
     }
 
     private KeycloakTokenManager getTokenManager() {
